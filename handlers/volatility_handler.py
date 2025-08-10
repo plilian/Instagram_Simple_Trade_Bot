@@ -7,7 +7,6 @@ from config import VOLATILITY_COIN, VOLATILITY_TIMEFRAME
 
 async def volatility_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    # اگر این تابع از طریق callback_query صدا زده شد پاسخ بده (برای دکمه‌های inline)
     if update.callback_query:
         await update.callback_query.answer()
         chat_id = update.callback_query.message.chat_id

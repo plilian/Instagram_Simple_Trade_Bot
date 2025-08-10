@@ -11,25 +11,20 @@ from config import RSI_COIN, RSI_TIMEFRAME
 
 
 def generate_rsi_chart(df: pd.DataFrame, rsi_values: pd.Series, coin_id: str, days: int):
-    """
-    Generates a professional-looking chart with price and RSI.
-    """
     plt.style.use('dark_background')
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 10), gridspec_kw={'height_ratios': [3, 1]})
 
     if not pd.api.types.is_datetime64_any_dtype(df['timestamp']):
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
 
-    # Price chart (Top)
     ax1.plot(df['timestamp'], df['close'], label=f'{coin_id.capitalize()} Price', color='white')
     ax1.set_title(f'Price and RSI for {coin_id.capitalize()} over {days} days', color='white', fontsize=16)
     ax1.set_ylabel('Price (USD)', color='white')
     ax1.grid(True, linestyle='--', alpha=0.5)
-    ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+    ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
     fig.autofmt_xdate()
     ax1.legend(loc='best')
 
-    # RSI chart (Bottom)
     ax2.plot(df['timestamp'], rsi_values, label='RSI', color='cyan')
     ax2.set_xlabel('Date', color='white')
     ax2.set_ylabel('RSI Value', color='white')
@@ -48,9 +43,6 @@ def generate_rsi_chart(df: pd.DataFrame, rsi_values: pd.Series, coin_id: str, da
 
 
 async def rsi_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Starts the conversation for RSI analysis.
-    """
     await update.callback_query.answer()
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
@@ -60,9 +52,6 @@ async def rsi_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def get_rsi_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Handles coin selection and presents timeframe options.
-    """
     coin_query = update.message.text.strip()
     coin_id = find_coin_id(coin_query)
 
@@ -97,9 +86,6 @@ async def get_rsi_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def get_rsi_timeframe(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Analyzes the selected timeframe and provides the trading signal and chart.
-    """
     query = update.callback_query
     await query.answer()
     await query.edit_message_text("در حال پردازش درخواست شما...")
@@ -113,7 +99,6 @@ async def get_rsi_timeframe(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     rsi_values = calculate_rsi(df, length=14)
-    # Added check for insufficient data points for a meaningful signal
     if rsi_values is None or rsi_values.empty or len(rsi_values) < 2 or pd.isna(rsi_values.iloc[-1]):
         await query.edit_message_text(
             "⚠️ محاسبه RSI امکان‌پذیر نبود یا داده کافی وجود ندارد. لطفا بازه زمانی دیگری را انتخاب کنید.")
@@ -130,7 +115,6 @@ async def get_rsi_timeframe(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     signal, explanation, entry_price, stop_loss, take_profit, rr_ratio = (None,) * 6
 
-    # Logic for Buy Signal: RSI moves from oversold (<30) to above 30.
     if rsi_value > 30 and rsi_values.iloc[-2] <= 30:
         signal = "✅ سیگنال خرید (خروج از اشباع فروش)"
         entry_price = last_price
@@ -142,7 +126,6 @@ async def get_rsi_timeframe(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "حد ضرر بر اساس نوسانات بازار و با نسبت ریسک/ریوارد منطقی تعیین شده است."
         )
 
-    # Logic for Sell Signal: RSI moves from overbought (>70) to below 70.
     elif rsi_value < 70 and rsi_values.iloc[-2] >= 70:
         signal = "🔻 سیگنال فروش (خروج از اشباع خرید)"
         entry_price = last_price
@@ -154,12 +137,11 @@ async def get_rsi_timeframe(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "حد ضرر بر اساس نوسانات بازار و با نسبت ریسک/ریوارد منطقی تعیین شده است."
         )
 
-    # Neutral/Wait Signal: RSI is in the mid-range (30-70).
     else:
         signal = "🔄 بازار متعادل - توصیه به صبر یا بررسی سایر شاخص‌ها"
         explanation = (
-            "RSI بین ۳۰ تا ۷۰ قرار دارد که نشان‌دهنده یک بازار متعادل یا بدون روند مشخص است. "
-            "در این شرایط، ورود به معامله پرریسک است. توصیه می‌شود منتظر سیگنال واضح‌تر بمانید."
+            "RSI در منطقه ۳۰ تا ۷۰ قرار دارد. در این شرایط، ورود به معامله "
+            "بر اساس RSI پرریسک است. توصیه می‌شود منتظر سیگنال واضح‌تر بمانید."
         )
 
     if entry_price and stop_loss and take_profit:
@@ -180,8 +162,8 @@ async def get_rsi_timeframe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if rr_ratio:
         msg += (
             f"🎯 نقطه ورود پیشنهادی: `${format_number(entry_price)}`\n"
-            f"🛑 حد ضرر (Stop Loss): `${format_number(stop_loss)}` ({risk_pct * 100:.2f}%)\n"
-            f"🏆 حد سود (Take Profit): `${format_number(take_profit)}` ({reward_pct * 100:.2f}%)\n"
+            f"🛑 حد ضرر (Stop Loss): `${format_number(stop_loss)}`\n"
+            f"🏆 حد سود (Take Profit): `${format_number(take_profit)}`\n"
             f"⚖️ نسبت ریسک به ریوارد (R/R Ratio): `{rr_ratio:.2f}`\n\n"
             "💡 **توجه:** این تحلیل صرفا یک سیگنال احتمالی است. همیشه با مدیریت ریسک وارد معامله شوید و به حد ضرر پایبند باشید."
         )

@@ -4,26 +4,32 @@ import matplotlib.dates as mdates
 import pandas as pd
 from telegram import Update, InputFile, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
-from services.coingecko_api import find_coin_id, fetch_ohlc_history, fetch_market_data
+from services.coingecko_api import find_coin_id, fetch_ohlc_history
 from services.metrics import calculate_rsi
 from utils.helpers import format_number
 from config import RSI_COIN, RSI_TIMEFRAME
 
+
 def generate_rsi_chart(df: pd.DataFrame, rsi_values: pd.Series, coin_id: str, days: int):
+    """
+    Generates a professional-looking chart with price and RSI.
+    """
     plt.style.use('dark_background')
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 10), gridspec_kw={'height_ratios': [3, 1]})
 
     if not pd.api.types.is_datetime64_any_dtype(df['timestamp']):
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
 
+    # Price chart (Top)
     ax1.plot(df['timestamp'], df['close'], label=f'{coin_id.capitalize()} Price', color='white')
     ax1.set_title(f'Price and RSI for {coin_id.capitalize()} over {days} days', color='white', fontsize=16)
     ax1.set_ylabel('Price (USD)', color='white')
     ax1.grid(True, linestyle='--', alpha=0.5)
-    ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
+    ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
     fig.autofmt_xdate()
     ax1.legend(loc='best')
 
+    # RSI chart (Bottom)
     ax2.plot(df['timestamp'], rsi_values, label='RSI', color='cyan')
     ax2.set_xlabel('Date', color='white')
     ax2.set_ylabel('RSI Value', color='white')
@@ -35,12 +41,16 @@ def generate_rsi_chart(df: pd.DataFrame, rsi_values: pd.Series, coin_id: str, da
     ax2.legend(loc='best')
 
     buf = io.BytesIO()
-    plt.savefig(buf, format='png')
+    plt.savefig(buf, format='png', bbox_inches='tight')
     plt.close(fig)
     buf.seek(0)
     return buf
 
+
 async def rsi_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Starts the conversation for RSI analysis.
+    """
     await update.callback_query.answer()
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
@@ -48,7 +58,11 @@ async def rsi_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return RSI_COIN
 
+
 async def get_rsi_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Handles coin selection and presents timeframe options.
+    """
     coin_query = update.message.text.strip()
     coin_id = find_coin_id(coin_query)
 
@@ -81,9 +95,14 @@ async def get_rsi_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return RSI_TIMEFRAME
 
+
 async def get_rsi_timeframe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Analyzes the selected timeframe and provides the trading signal and chart.
+    """
     query = update.callback_query
     await query.answer()
+    await query.edit_message_text("در حال پردازش درخواست شما...")
 
     days = int(query.data.split('_')[-1])
     coin_id = context.user_data.get('coin_id')
@@ -94,85 +113,84 @@ async def get_rsi_timeframe(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     rsi_values = calculate_rsi(df, length=14)
-    if rsi_values is None or rsi_values.empty or pd.isna(rsi_values.iloc[-1]):
-        await query.edit_message_text("⚠️ محاسبه RSI امکان‌پذیر نبود. لطفا بازه زمانی دیگری را انتخاب کنید.")
+    # Added check for insufficient data points for a meaningful signal
+    if rsi_values is None or rsi_values.empty or len(rsi_values) < 2 or pd.isna(rsi_values.iloc[-1]):
+        await query.edit_message_text(
+            "⚠️ محاسبه RSI امکان‌پذیر نبود یا داده کافی وجود ندارد. لطفا بازه زمانی دیگری را انتخاب کنید.")
         return ConversationHandler.END
 
     rsi_value = rsi_values.iloc[-1]
     last_price = df["close"].iloc[-1]
 
-    market_data = fetch_market_data(coin_id)
-    if not market_data:
-        await query.edit_message_text("⚠️ داده بازار یافت نشد.")
-        return ConversationHandler.END
-
     returns = df["close"].pct_change().dropna()
     volatility = returns.std() if not returns.empty else 0.02
 
-    risk_pct = volatility * 2  #
-    reward_pct = volatility * 4  #
+    risk_pct = volatility * 1.5
+    reward_pct = volatility * 3
 
-    if rsi_value < 30:
-        signal = "✅ سیگنال خرید (اشباع فروش)"
+    signal, explanation, entry_price, stop_loss, take_profit, rr_ratio = (None,) * 6
+
+    # Logic for Buy Signal: RSI moves from oversold (<30) to above 30.
+    if rsi_value > 30 and rsi_values.iloc[-2] <= 30:
+        signal = "✅ سیگنال خرید (خروج از اشباع فروش)"
         entry_price = last_price
         stop_loss = entry_price * (1 - risk_pct)
         take_profit = entry_price * (1 + reward_pct)
         explanation = (
-            "RSI کمتر از ۳۰ نشان‌دهنده منطقه اشباع فروش است. "
-            "این سیگنال ورود به معامله خرید را پیشنهاد می‌کند.\n"
-            f"حد ضرر به اندازه {risk_pct*100:.2f}% پایین‌تر از قیمت ورود تنظیم شده است "
-            "تا در صورت حرکت نامطلوب بازار ضرر کنترل شود.\n"
-            f"حد سود به اندازه {reward_pct*100:.2f}% بالاتر از قیمت ورود تنظیم شده است "
-            "تا سود مناسبی هدف قرار گیرد."
+            "RSI از منطقه اشباع فروش (زیر ۳۰) خارج شده و این می‌تواند نشانه "
+            "شروع یک روند صعودی باشد. این سیگنال ورود به معامله خرید را پیشنهاد می‌کند.\n"
+            "حد ضرر بر اساس نوسانات بازار و با نسبت ریسک/ریوارد منطقی تعیین شده است."
         )
-    elif rsi_value > 70:
-        signal = "⚠️ سیگنال فروش (اشباع خرید) - پیشنهاد عدم ورود"
-        entry_price = None
-        stop_loss = None
-        take_profit = None
+
+    # Logic for Sell Signal: RSI moves from overbought (>70) to below 70.
+    elif rsi_value < 70 and rsi_values.iloc[-2] >= 70:
+        signal = "🔻 سیگنال فروش (خروج از اشباع خرید)"
+        entry_price = last_price
+        stop_loss = entry_price * (1 + risk_pct)
+        take_profit = entry_price * (1 - reward_pct)
         explanation = (
-            "RSI بیشتر از ۷۰ نشان‌دهنده منطقه اشباع خرید است. "
-            "در این شرایط ورود به معامله خرید توصیه نمی‌شود و بهتر است "
-            "منتظر کاهش قیمت‌ها یا تغییر شرایط باشید."
+            "RSI از منطقه اشباع خرید (بالای ۷۰) خارج شده و این می‌تواند نشانه "
+            "شروع یک روند نزولی باشد. این سیگنال ورود به معامله فروش را پیشنهاد می‌کند.\n"
+            "حد ضرر بر اساس نوسانات بازار و با نسبت ریسک/ریوارد منطقی تعیین شده است."
         )
+
+    # Neutral/Wait Signal: RSI is in the mid-range (30-70).
     else:
-        signal = "🔄 بازار متعادل - توصیه به صبر یا مدیریت ریسک دقیق"
-        entry_price = None
-        stop_loss = None
-        take_profit = None
+        signal = "🔄 بازار متعادل - توصیه به صبر یا بررسی سایر شاخص‌ها"
         explanation = (
-            "RSI بین ۳۰ تا ۷۰ نشان‌دهنده بازار متعادل است. "
-            "در این شرایط ورود مستقیم توصیه نمی‌شود مگر اینکه مدیریت ریسک دقیقی داشته باشید."
+            "RSI بین ۳۰ تا ۷۰ قرار دارد که نشان‌دهنده یک بازار متعادل یا بدون روند مشخص است. "
+            "در این شرایط، ورود به معامله پرریسک است. توصیه می‌شود منتظر سیگنال واضح‌تر بمانید."
         )
 
     if entry_price and stop_loss and take_profit:
-        risk_value = entry_price - stop_loss
-        reward_value = take_profit - entry_price
+        risk_value = abs(entry_price - stop_loss)
+        reward_value = abs(take_profit - entry_price)
         rr_ratio = reward_value / risk_value if risk_value > 0 else None
     else:
         rr_ratio = None
 
     msg = (
-        f"📊 تحلیل تکنیکال **{coin_id}** بر اساس داده‌های {days} روز گذشته:\n"
-        f"🔹 آخرین قیمت: ${last_price:.4f}\n"
-        f"🔹 مقدار RSI: {rsi_value:.2f}\n\n"
+        f"📊 تحلیل تکنیکال **{coin_id.capitalize()}** بر اساس داده‌های {days} روز گذشته:\n"
+        f"🔹 آخرین قیمت: `${format_number(last_price)}`\n"
+        f"🔹 مقدار RSI: `{rsi_value:.2f}`\n\n"
         f"{signal}\n\n"
         f"{explanation}\n\n"
     )
 
     if rr_ratio:
         msg += (
-            f"🎯 نقطه ورود پیشنهادی: ${entry_price:.4f}\n"
-            f"🛑 حد ضرر (Stop Loss): ${stop_loss:.4f} ({risk_pct*100:.2f}%)\n"
-            f"🏆 حد سود (Take Profit): ${take_profit:.4f} ({reward_pct*100:.2f}%)\n"
-            f"⚖️ نسبت ریسک به ریوارد: {rr_ratio:.2f}\n\n"
-            "💡 همیشه با مدیریت ریسک وارد بازار شوید و به حد ضرر احترام بگذارید."
+            f"🎯 نقطه ورود پیشنهادی: `${format_number(entry_price)}`\n"
+            f"🛑 حد ضرر (Stop Loss): `${format_number(stop_loss)}` ({risk_pct * 100:.2f}%)\n"
+            f"🏆 حد سود (Take Profit): `${format_number(take_profit)}` ({reward_pct * 100:.2f}%)\n"
+            f"⚖️ نسبت ریسک به ریوارد (R/R Ratio): `{rr_ratio:.2f}`\n\n"
+            "💡 **توجه:** این تحلیل صرفا یک سیگنال احتمالی است. همیشه با مدیریت ریسک وارد معامله شوید و به حد ضرر پایبند باشید."
         )
     else:
-        msg += "💡 در شرایط فعلی پیشنهاد می‌شود یا وارد نشوید یا ریسک را به دقت مدیریت کنید."
+        msg += "💡 در شرایط فعلی، برای جلوگیری از ریسک غیرضروری، بهتر است وارد معامله نشوید."
 
     chart_buffer = generate_rsi_chart(df, rsi_values, coin_id, days)
-    await context.bot.send_photo(chat_id=update.effective_chat.id, photo=InputFile(chart_buffer, filename=f'{coin_id}_rsi_chart.png'))
+    await context.bot.send_photo(chat_id=update.effective_chat.id,
+                                 photo=InputFile(chart_buffer, filename=f'{coin_id}_rsi_chart.png'))
     await context.bot.send_message(chat_id=update.effective_chat.id, text=msg, parse_mode='Markdown')
 
     return ConversationHandler.END

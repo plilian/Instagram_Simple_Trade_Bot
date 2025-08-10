@@ -44,10 +44,11 @@
 
 ```bash
 python main.py
+```
 
 
 
-
+```
 crypto_bot/
 │
 ├── main.py
@@ -65,7 +66,7 @@ crypto_bot/
 │   └── helpers.py
 ├── requirements.txt
 └── .env
-
+```
 
 🤝 توسعه و همکاری
 اگر به توسعه قابلیت‌های جدید علاقه دارید، می‌توانید با ارسال Pull Request یا باز کردن Issue همکاری کنید.

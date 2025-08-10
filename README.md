@@ -47,6 +47,7 @@ python main.py
 ```
 
 
+### ۲. ساختار پروژه
 
 ```
 crypto_bot/

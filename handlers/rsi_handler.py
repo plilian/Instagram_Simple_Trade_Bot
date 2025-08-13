@@ -1,3 +1,4 @@
+import asyncio
 import io
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
@@ -54,7 +55,7 @@ async def rsi_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_rsi_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     coin_query = update.message.text.strip()
     coin_id = find_coin_id(coin_query)
-
+    await asyncio.sleep(1)
     if not coin_id:
         await update.message.reply_text("⚠️ کوین مورد نظر پیدا نشد. لطفا دوباره تلاش کنید.")
         return RSI_COIN
@@ -94,6 +95,7 @@ async def get_rsi_timeframe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     coin_id = context.user_data.get('coin_id')
 
     df = fetch_ohlc_history(coin_id, days)
+    await asyncio.sleep(1)
     if df.empty or 'close' not in df.columns or 'timestamp' not in df.columns:
         await query.edit_message_text("❌ داده‌ای برای این کوین یافت نشد. لطفا دوباره تلاش کنید.")
         return ConversationHandler.END
